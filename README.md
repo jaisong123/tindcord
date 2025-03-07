@@ -1,16 +1,16 @@
 <h1 align="center">
-  llmcord
+  tindcord
 </h1>
 
 <h3 align="center"><i>
-  Talk to LLMs with your friends!
+  Talk to LLMs with your friends on Discord!
 </i></h3>
 
 <p align="center">
   <img src="https://github.com/jakobdylanc/llmcord/assets/38699060/789d49fe-ef5c-470e-b60e-48ac03057443" alt="">
 </p>
 
-llmcord transforms Discord into a collaborative LLM frontend. It works with practically any LLM, remote or locally hosted.
+tindcord (forked from llmcord) transforms Discord into a collaborative LLM frontend. It works with practically any LLM, remote or locally hosted.
 
 ## Features
 
@@ -28,7 +28,7 @@ Additionally:
 - Back-to-back messages from the same user are automatically chained together. Just reply to the latest one and the bot will see all of them.
 
 ### Choose any LLM
-llmcord supports remote models from:
+tindcord supports remote models from:
 - [OpenAI API](https://platform.openai.com/docs/models)
 - [xAI API](https://docs.x.ai/docs/models)
 - [Mistral API](https://docs.mistral.ai/getting-started/models/models_overview)
@@ -58,7 +58,7 @@ Or run a local model with:
 
 1. Clone the repo:
    ```bash
-   git clone https://github.com/jakobdylanc/llmcord
+   git clone https://github.com/jaisong123/tindcord
    ```
 
 2. Create a copy of "config-example.yaml" named "config.yaml" and set it up:
@@ -91,7 +91,7 @@ Or run a local model with:
    **No Docker:**
    ```bash
    python -m pip install -U -r requirements.txt
-   python llmcord.py
+   python tindcord.py
    ```
 
    **With Docker:**
@@ -109,10 +109,10 @@ Or run a local model with:
 
 ## Star History
 
-<a href="https://star-history.com/#jakobdylanc/llmcord&Date">
+<a href="https://star-history.com/#jaisong123/tindcord&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jaisong123/tindcord&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jaisong123/tindcord&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jaisong123/tindcord&type=Date" />
   </picture>
 </a>
