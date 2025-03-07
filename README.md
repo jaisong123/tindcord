@@ -27,8 +27,21 @@ Additionally:
 - You can branch conversations into [threads](https://support.discord.com/hc/en-us/articles/4403205878423-Threads-FAQ). Just create a thread from any message and @ the bot inside to continue.
 - Back-to-back messages from the same user are automatically chained together. Just reply to the latest one and the bot will see all of them.
 
+### Image Analysis with "@bot reply?"
+For quick image analysis using Claude API:
+1. Upload an image to Discord
+2. Mention the bot with "@bot reply?" in the same message
+3. The bot will process the image with Claude API and provide a detailed analysis
+
+This feature:
+- Works with any image format supported by Discord
+- Uses Claude's advanced vision capabilities
+- Includes automatic retry with exponential backoff for API rate limits
+- Streams the response in real-time
+
 ### Choose any LLM
 tindcord supports remote models from:
+- [Anthropic Claude API](https://docs.anthropic.com/claude/reference/getting-started-with-the-api) (with special "@bot reply?" command for image analysis)
 - [OpenAI API](https://platform.openai.com/docs/models)
 - [xAI API](https://docs.x.ai/docs/models)
 - [Mistral API](https://docs.mistral.ai/getting-started/models/models_overview)
@@ -44,6 +57,7 @@ Or run a local model with:
 
 ### And more:
 - Supports image attachments when using a vision model (like gpt-4o, claude-3, llava, etc.)
+- **Special "@bot reply?" command for image analysis with Claude API**
 - Supports text file attachments (.txt, .py, .c, etc.)
 - Customizable personality (aka system prompt)
 - User identity aware (OpenAI API and xAI API only)
@@ -52,7 +66,7 @@ Or run a local model with:
 - Displays helpful warnings when appropriate (like "⚠️ Only using last 25 messages" when the customizable message limit is exceeded)
 - Caches message data in a size-managed (no memory leaks) and mutex-protected (no race conditions) global dictionary to maximize efficiency and minimize Discord API calls
 - Fully asynchronous
-- 1 Python file, ~200 lines of code
+- Exponential backoff for API rate limits
 
 ## Instructions
 
@@ -98,12 +112,20 @@ Or run a local model with:
    ```bash
    docker compose up
    ```
+   
+   **Cloud Deployment:**
+   See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed instructions on deploying to Google Cloud Platform.
 
 ## Notes
 
 - If you're having issues, try my suggestions [here](https://github.com/jakobdylanc/llmcord/issues/19)
 
 - Only models from OpenAI API and xAI API are "user identity aware" because only they support the "name" parameter in the message object. Hopefully more providers support this in the future.
+
+- To test the Claude API integration, you can use the included test script:
+  ```bash
+  python test_claude_api.py path/to/test/image.jpg
+  ```
 
 - PRs are welcome :)
 

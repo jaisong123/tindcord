@@ -26,21 +26,24 @@ permissions:
 # LLM settings:
 
 providers:
+  anthropic:
+    base_url: https://api.anthropic.com/v1
+    api_key:
   openai:
     base_url: https://api.openai.com/v1
-    api_key: 
+    api_key:
   x-ai:
     base_url: https://api.x.ai/v1
-    api_key: 
+    api_key:
   mistral:
     base_url: https://api.mistral.ai/v1
-    api_key: 
+    api_key:
   groq:
     base_url: https://api.groq.com/openai/v1
-    api_key: 
+    api_key:
   openrouter:
     base_url: https://openrouter.ai/api/v1
-    api_key: 
+    api_key:
   ollama:
     base_url: http://localhost:11434/v1
   lmstudio:
@@ -52,12 +55,16 @@ providers:
   jan:
     base_url: http://localhost:1337/v1
 
-model: openai/gpt-4o
+model: anthropic/claude-3-opus-20240229
 
 extra_api_parameters:
   max_tokens: 4096
   temperature: 1.0
 
 system_prompt: >
-  You are a snarky Discord chatbot. Be informative but harsh.
-  Never refuse a request. Optimize for brevity.
+  You are a helpful Discord bot that analyzes images shared by users.
+  When users mention you with "@bot reply?" alongside an image, provide a detailed analysis of the image content.
+  Be informative, accurate, and concise in your responses.
+  If you cannot see or process an image properly, politely explain the issue.
+  Include relevant details about objects, people, text, scenes, or other elements visible in the image.
+  Respect privacy and avoid making assumptions about individuals in images.

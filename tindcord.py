@@ -3,12 +3,15 @@ from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
 import logging
-from typing import Literal, Optional
+import re
+from typing import Literal, Optional, Union, Dict, Any
 
 import discord
 import httpx
 from openai import AsyncOpenAI
 import yaml
+
+from claude_integration import ClaudeClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -19,6 +22,10 @@ VISION_MODEL_TAGS = ("gpt-4", "claude-3", "gemini", "pixtral", "llava", "vision"
 PROVIDERS_SUPPORTING_USERNAMES = ("openai", "x-ai")
 
 ALLOWED_FILE_TYPES = ("image", "text")
+
+# Claude API specific constants
+CLAUDE_COMMAND_PATTERN = r"@bot\s+reply\?"
+CLAUDE_PROVIDER = "anthropic"
 
 EMBED_COLOR_COMPLETE = discord.Color.dark_green()
 EMBED_COLOR_INCOMPLETE = discord.Color.orange()
@@ -48,6 +55,7 @@ httpx_client = httpx.AsyncClient()
 
 msg_nodes = {}
 last_task_time = 0
+processing_locks = {}  # Dictionary to track which messages are being processed
 
 
 @dataclass
@@ -72,7 +80,21 @@ async def on_message(new_msg):
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
-    if (not is_dm and discord_client.user not in new_msg.mentions) or new_msg.author.bot:
+    # Skip messages from bots
+    if new_msg.author.bot:
+        return
+        
+    # Check for "@bot reply?" command with image
+    is_claude_image_request = False
+    if re.search(CLAUDE_COMMAND_PATTERN, new_msg.content, re.IGNORECASE) or (discord_client.user in new_msg.mentions and "reply?" in new_msg.content.lower()):
+        # Check if there's an image attachment
+        image_attachments = [att for att in new_msg.attachments if att.content_type and "image" in att.content_type]
+        if image_attachments:
+            is_claude_image_request = True
+            logging.info(f"Detected Claude image request: {new_msg.content}")
+    
+    # Skip messages that don't mention the bot and aren't Claude image requests
+    if not is_dm and not is_claude_image_request and discord_client.user not in new_msg.mentions:
         return
 
     role_ids = set(role.id for role in getattr(new_msg.author, "roles", ()))
@@ -96,6 +118,11 @@ async def on_message(new_msg):
     is_bad_channel = not is_good_channel or any(id in blocked_channel_ids for id in channel_ids)
 
     if is_bad_user or is_bad_channel:
+        return
+        
+    # Handle Claude image request
+    if is_claude_image_request:
+        await process_claude_image_request(new_msg, image_attachments[0])
         return
 
     provider, model = cfg["model"].split("/", 1)
@@ -277,6 +304,218 @@ async def on_message(new_msg):
         for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
             async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
                 msg_nodes.pop(msg_id, None)
+
+
+async def process_claude_image_request(new_msg, image_attachment):
+    """
+    Process an image with Claude API when the "@bot reply?" command is detected.
+    
+    Args:
+        new_msg: The Discord message containing the command and image
+        image_attachment: The image attachment to process
+    """
+    global processing_locks
+    
+    # Check if this message is already being processed
+    if new_msg.id in processing_locks:
+        logging.info(f"Message {new_msg.id} is already being processed, skipping")
+        return
+    
+    # Mark this message as being processed
+    processing_locks[new_msg.id] = True
+    
+    try:
+        logging.info(f"Processing image with Claude API (user ID: {new_msg.author.id}, attachment: {image_attachment.filename})")
+        
+        # Get configuration
+        cfg = get_config()
+        
+        # Get Claude API key
+        api_key = cfg["providers"][CLAUDE_PROVIDER].get("api_key")
+        if not api_key:
+            await new_msg.reply("Error: Claude API key not configured. Please add it to your config.yaml file.")
+            return
+        
+        # Initialize Claude client
+        claude_client = ClaudeClient(api_key)
+        
+        # Set model if specified in config
+        if "/" in cfg["model"] and cfg["model"].split("/", 1)[0] == CLAUDE_PROVIDER:
+            claude_client.set_model(cfg["model"].split("/", 1)[1])
+        
+        # Get system prompt
+        system_prompt = cfg["system_prompt"] or "You are a helpful assistant that analyzes images."
+        
+        # Extract user prompt (remove the command pattern and bot mention)
+        user_content = new_msg.content
+        user_prompt = re.sub(CLAUDE_COMMAND_PATTERN, "", user_content, flags=re.IGNORECASE).strip()
+        
+        # Also remove bot mention if present
+        if discord_client.user:
+            user_prompt = user_prompt.replace(discord_client.user.mention, "").strip()
+        
+        # Default prompt if empty or just "reply?"
+        if not user_prompt or user_prompt.lower() == "reply?":
+            user_prompt = """
+Extract the text from the image and organize it into a conversation format. Follow these steps to ensure accuracy:
+
+Identify Users: Clearly distinguish between messages from two different users based on their positions in the image. Label them as 'User 1 (Right side)' and 'User 2 (Left side)' based on their placement.
+
+Chronological Order: Arrange the messages in chronological order according to the timestamps provided in the image. If timestamps are not visible, use the logical sequence of messages to determine the order.
+
+Attribution: Ensure each message is correctly attributed to the corresponding user. Maintain the integrity of the conversation by preserving the flow and context.
+
+Natural Flow: Present the conversation in a natural, readable format without any numbering or additional markers. The output should be a clean, chronological conversation.
+
+Accuracy: Double-check the arrangement to ensure there are no misplaced messages or attribution errors.
+
+Example Format:
+
+Blake (Right side): [Message]
+User 1 (Left side): [Message]
+Follow these guidelines to produce an accurate and coherent conversation transcript from the image.
+"""
+        
+        logging.info(f"User prompt after cleaning: '{user_prompt}'")
+        
+        # Get max tokens
+        max_tokens = cfg["extra_api_parameters"].get("max_tokens", 4096)
+        
+        # Download image
+        image_response = await httpx_client.get(image_attachment.url)
+        image_data = image_response.content
+        content_type = image_attachment.content_type
+        
+        logging.info(f"Downloaded image: {len(image_data)} bytes, content type: {content_type}")
+        
+        # Process with Claude API
+        embed = discord.Embed()
+        embed.description = "Thinking..." + STREAMING_INDICATOR  # Add placeholder description
+        embed.color = EMBED_COLOR_INCOMPLETE
+        
+        # Send initial response
+        response_msg = await new_msg.reply(embed=embed, silent=True)
+        
+        # Step 1: Extract conversation from image
+        extraction_prompt = """
+Extract the text from this dating app screenshot and organize it into a conversation format.
+1. Identify messages from Blake (right side, blue) and the other user (left side)
+2. Arrange messages in chronological order
+3. Format as "User: [message]" and "Blake: [message]"
+4. ONLY extract the conversation, do not add any additional text or response
+"""
+        logging.info(f"Sending extraction request to Claude API")
+        logging.info(f"System prompt length: {len(system_prompt)} characters")
+        
+        # First API call to extract conversation
+        extracted_conversation, extraction_success = await claude_client.process_image(
+            image_data=image_data,
+            content_type=content_type,
+            prompt=extraction_prompt,
+            system_prompt="You are a helpful assistant that extracts text from images accurately.",
+            max_tokens=max_tokens
+        )
+        
+        logging.info(f"Extraction response: success={extraction_success}, length={len(extracted_conversation)}")
+        
+        if not extraction_success or not extracted_conversation:
+            logging.error(f"Failed to extract conversation: {extracted_conversation}")
+            embed.description = "Failed to extract conversation from image. Please try again."
+            embed.color = discord.Color.red()
+            await response_msg.edit(embed=embed)
+            return
+        
+        # Step 2: Generate Blake's response based on extracted conversation
+        response_prompt = f"""
+Here is the extracted conversation from a dating app:
+
+{extracted_conversation}
+
+IMPORTANT: Respond ONLY as Blake to continue this conversation.
+DO NOT repeat the conversation above.
+DO NOT include "User:" or "Blake:" prefixes in your response.
+Simply write what Blake would say next in his characteristic style.
+"""
+        logging.info(f"Sending response request to Claude API")
+        
+        # Second API call to generate Blake's response
+        blake_response, response_success = await claude_client.process_image(
+            image_data=image_data,
+            content_type=content_type,
+            prompt=response_prompt,
+            system_prompt=system_prompt,
+            max_tokens=max_tokens
+        )
+        
+        logging.info(f"Blake response: success={response_success}, length={len(blake_response)}")
+        
+        if response_success and blake_response:
+            # Clean up Blake's response to remove any extracted conversation parts
+            # Look for patterns like "User: ... Blake: ..." and remove them
+            cleaned_response = blake_response
+            
+            # Remove any lines that start with "User:" or contain conversation formatting
+            lines = cleaned_response.split('\n')
+            cleaned_lines = []
+            
+            # Flag to indicate we've found Blake's actual response (after any extracted conversation)
+            found_blake_response = False
+            
+            for line in lines:
+                # Skip empty lines at the beginning
+                if not line.strip() and not found_blake_response:
+                    continue
+                    
+                # Skip lines that look like part of the extracted conversation
+                if line.strip().startswith("User:") or line.strip().startswith("Blake:"):
+                    # But if it's a new Blake response after the conversation, keep it
+                    if found_blake_response:
+                        cleaned_lines.append(line)
+                else:
+                    # This is likely Blake's actual response
+                    found_blake_response = True
+                    cleaned_lines.append(line)
+            
+            # If we couldn't clean it properly, just use the original response
+            if not cleaned_lines:
+                cleaned_response = blake_response
+            else:
+                cleaned_response = '\n'.join(cleaned_lines)
+            
+            full_response = cleaned_response
+            embed.description = full_response
+            embed.color = EMBED_COLOR_COMPLETE
+            await response_msg.edit(embed=embed)
+            
+            # Log both the extracted conversation and Blake's response for debugging
+            logging.info(f"Extracted conversation: {extracted_conversation}")
+            logging.info(f"Blake's response: {blake_response}")
+            logging.info(f"Cleaned response: {cleaned_response}")
+            
+            # Store in message nodes
+            msg_nodes[response_msg.id] = MsgNode(
+                text=full_response,
+                role="assistant",
+                parent_msg=new_msg
+            )
+        else:
+            logging.error(f"Failed to generate Blake's response: {blake_response}")
+            embed.description = "Failed to generate response. Please try again."
+            embed.color = discord.Color.red()
+            await response_msg.edit(embed=embed)
+    except Exception as e:
+        logging.exception(f"Error processing image with Claude API: {e}")
+        try:
+            embed.description = f"Error: {str(e)}"
+            embed.color = discord.Color.red()
+            await response_msg.edit(embed=embed)
+        except:
+            await new_msg.reply(f"Error: {str(e)}", silent=True)
+    finally:
+        # Always release the lock when done
+        if new_msg.id in processing_locks:
+            del processing_locks[new_msg.id]
+            logging.info(f"Released processing lock for message {new_msg.id}")
 
 
 async def main():
